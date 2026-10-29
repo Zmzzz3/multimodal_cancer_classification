@@ -1,0 +1,38 @@
+[project]
+name = "comp3419-a2-opt8-code"
+version = "0.0.0"
+description = "Paired WSI and RNA classification baseline"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy~=2.4.4",
+    "pandas~=2.3.3",
+    "pyarrow~=24.0.0",
+    "pyyaml~=6.0.3",
+    "scikit-learn~=1.8.0",
+    "timm==1.0.26",
+    "torch==2.10.0",
+    "torcheval~=0.0.7",
+    "torchvision==0.25.0",
+    "wandb~=0.25.1",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.12.5"
+resolution = "lowest-direct"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+# Use CUDA builds on Linux and Windows x86_64; use PyPI elsewhere.
+torch = [
+    {index = "pytorch-cu128", marker = "(sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86_64'))"},
+]
+torchvision = [
+    {index = "pytorch-cu128", marker = "(sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86_64'))"},
+]

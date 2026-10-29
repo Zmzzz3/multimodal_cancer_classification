@@ -1,0 +1,113 @@
+# Dataset parameters
+data_dir: input
+classes: [LUAD, LUSC]
+wsi_feature_only: false
+val: true
+num_wsi_feature_tokens: 1024
+
+# Model parameters
+model: baseline_classifier
+initial_checkpoint: ""
+resume: ""
+no_resume_opt: false
+num_classes: 2
+in_chans: null
+# Training bags use the fixed patch count above. Evaluation keeps full bags.
+batch_size: 16
+validation_batch_size: 1
+fuser: ""
+grad_accum_steps: 1
+grad_checkpointing: false
+fast_norm: false
+model_kwargs:
+  wsi_embed_dim: 768
+  # The supplied index determines the actual RNA width saved in the checkpoint.
+  rna_embed_dim: 4538
+  embed_dim: 768
+  fusion: concat
+init_head: false
+head_init_scale: null
+head_init_bias: null
+torchscript: false
+torchcompile: null
+
+# Device & distributed
+device: cuda
+amp: true
+amp_dtype: float16
+amp_impl: native
+no_ddp_bb: false
+synchronize_step: false
+local_rank: 0
+device_modules: null
+
+# Optimizer parameters
+opt: adam
+opt_eps: null
+opt_betas: null
+momentum: 0.9
+weight_decay: 0.0
+clip_grad: null
+clip_mode: norm
+layer_decay: null
+opt_kwargs: {}
+
+# Learning rate schedule parameters
+# Scheduling is disabled. The remaining scheduler options retain parser defaults.
+use_sched: false
+sched: cosine
+sched_on_updates: false
+lr: 0.002
+lr_base: 0.1
+lr_base_size: 256
+lr_base_scale: ""
+lr_noise: null
+lr_noise_pct: 0.67
+lr_noise_std: 1.0
+lr_cycle_mul: 1.0
+lr_cycle_decay: 0.5
+lr_cycle_limit: 1
+lr_k_decay: 1.0
+warmup_lr: 0.00001
+min_lr: 0
+epochs: 100
+epoch_repeats: 0.0
+start_epoch: null
+decay_milestones: [90, 180, 270]
+decay_epochs: 90
+warmup_epochs: 5
+warmup_prefix: false
+cooldown_epochs: 0
+patience_epochs: 10
+decay_rate: 0.1
+
+# Augmentation & regularization parameters
+loss: ce_loss
+smoothing: 0.1
+
+# Batch norm parameters (inactive for this LayerNorm-based baseline)
+sync_bn: false
+dist_bn: reduce
+
+# Model exponential moving average parameters
+model_ema: false
+model_ema_force_cpu: false
+model_ema_decay: 0.9998
+model_ema_warmup: false
+
+# Miscellaneous parameters
+seed: 42
+worker_seeding: all
+log_interval: 100
+recovery_interval: 0
+checkpoint_hist: 1
+workers: 0
+pin_mem: true
+drop_last: false
+output: output
+experiment: baseline
+# The trainer's auc key is LUSC-positive AUROC, also exported as auroc.
+eval_metric: auc
+eval_metric_average: macro
+log_wandb: false
+wandb_project: ""
