@@ -1,4 +1,4 @@
-"""Small ABMIL and MLP baseline for paired tumour classification."""
+"""Multimodal and unimodal ABMIL/MLP tumour classifiers."""
 
 import torch
 from torch import nn
@@ -42,6 +42,18 @@ class AttentionPool(nn.Module):
         return torch.bmm(weights.transpose(1, 2), patches).squeeze(1)
 
 
+def _rna_encoder(input_dim, width):
+    """Build the RNA MLP shared by the paired and RNA-only baselines."""
+    layers = []
+    for in_features in (input_dim, width):
+        layers.extend([
+            nn.Linear(in_features, width), nn.LayerNorm(width),
+            nn.ReLU(), nn.Dropout(0.2),
+        ])
+    layers.append(nn.Linear(width, width))
+    return nn.Sequential(*layers)
+
+
 class BaselineClassifier(nn.Module):
     """Fuse WSI attention pooling and an RNA MLP by concatenation.
 
@@ -62,14 +74,7 @@ class BaselineClassifier(nn.Module):
             raise ValueError("This baseline uses concatenation fusion")
         self.num_classes = num_classes
         self.wsi_encoder = AttentionPool(wsi_embed_dim, embed_dim)
-        rna_layers = []
-        for in_features in (rna_embed_dim, embed_dim):
-            rna_layers.extend([
-                nn.Linear(in_features, embed_dim), nn.LayerNorm(embed_dim),
-                nn.ReLU(), nn.Dropout(0.2),
-            ])
-        rna_layers.append(nn.Linear(embed_dim, embed_dim))
-        self.rna_encoder = nn.Sequential(*rna_layers)
+        self.rna_encoder = _rna_encoder(rna_embed_dim, embed_dim)
         self.head = nn.Linear(2 * embed_dim, num_classes)
 
     def get_classifier(self):
@@ -91,6 +96,61 @@ class BaselineClassifier(nn.Module):
         return self.head(embedding)
 
 
+class WSIOnlyClassifier(nn.Module):
+    """Gated ABMIL followed by a linear classifier, using only WSI features.
+
+    Accepts either [RNA, WSI] or a WSI tensor [B, N, wsi_embed_dim].
+    rna_embed_dim and fusion are accepted for baseline-config compatibility;
+    no RNA encoder or multimodal fusion is instantiated.
+    """
+
+    def __init__(self, rna_embed_dim=None, wsi_embed_dim=768, embed_dim=768,
+                 num_classes=2, fusion="concat"):
+        super().__init__()
+        self.num_classes = num_classes
+        self.wsi_encoder = AttentionPool(wsi_embed_dim, embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes)
+
+    def get_classifier(self):
+        return self.head
+
+    def forward(self, x):
+        wsi = x[1] if isinstance(x, (list, tuple)) else x
+        return self.head(self.wsi_encoder(wsi))
+
+
+class RNAOnlyClassifier(nn.Module):
+    """RNA MLP followed by a linear classifier, using only RNA features.
+
+    Accepts either [RNA, WSI] or an RNA tensor [B, rna_embed_dim].
+    wsi_embed_dim and fusion are accepted for baseline-config compatibility;
+    no WSI encoder or multimodal fusion is instantiated.
+    """
+
+    def __init__(self, rna_embed_dim, wsi_embed_dim=768, embed_dim=768,
+                 num_classes=2, fusion="concat"):
+        super().__init__()
+        self.num_classes = num_classes
+        self.rna_encoder = _rna_encoder(rna_embed_dim, embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes)
+
+    def get_classifier(self):
+        return self.head
+
+    def forward(self, x):
+        rna = x[0] if isinstance(x, (list, tuple)) else x
+        return self.head(self.rna_encoder(rna))
+
+
+def _create_baseline(classifier, pretrained, kwargs):
+    if pretrained:
+        raise ValueError("The baseline has no pretrained weights")
+    # timm passes metadata keys that these classifiers do not use.
+    for name in ("pretrained_cfg", "pretrained_cfg_overlay", "cache_dir"):
+        kwargs.pop(name, None)
+    return classifier(**kwargs)
+
+
 @register_model
 def baseline_classifier(pretrained=False, **kwargs):
     """Create the registered baseline through timm.
@@ -105,9 +165,16 @@ def baseline_classifier(pretrained=False, **kwargs):
     Raises:
         ValueError: If pretrained weights or unsupported fusion are requested.
     """
-    if pretrained:
-        raise ValueError("The baseline has no pretrained weights")
-    # timm passes these metadata keys even though this model does not use them.
-    for name in ("pretrained_cfg", "pretrained_cfg_overlay", "cache_dir"):
-        kwargs.pop(name, None)
-    return BaselineClassifier(**kwargs)
+    return _create_baseline(BaselineClassifier, pretrained, kwargs)
+
+
+@register_model
+def wsi_only_classifier(pretrained=False, **kwargs):
+    """Create the WSI-only baseline through timm (no pretrained weights)."""
+    return _create_baseline(WSIOnlyClassifier, pretrained, kwargs)
+
+
+@register_model
+def rna_only_classifier(pretrained=False, **kwargs):
+    """Create the RNA-only baseline through timm (no pretrained weights)."""
+    return _create_baseline(RNAOnlyClassifier, pretrained, kwargs)
