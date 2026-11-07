@@ -106,7 +106,7 @@ workers: 0
 pin_mem: true
 drop_last: false
 output: output
-experiment: wsi_only
+experiment: wsi
 # The trainer's auc key is LUSC-positive AUROC, also exported as auroc.
 eval_metric: auc
 eval_metric_average: macro
