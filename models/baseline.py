@@ -101,13 +101,34 @@ class BaselineClassifier(nn.Module):
         return self.head(embedding)
 
 
+class GatedMultimodalUnit(nn.Module):
+    """Patient- and feature-specific mixing of WSI and RNA representations.
+
+    Gate values near one favour WSI; values near zero favour RNA.
+    Both inputs inform the sigmoid gate, while separate tanh projections
+    place the two modalities into the shared output space.
+    """
+
+    def __init__(self, width):
+        super().__init__()
+        self.wsi_transform = nn.Linear(width, width)
+        self.rna_transform = nn.Linear(width, width)
+        self.gate = nn.Linear(2 * width, width)
+
+    def forward(self, wsi, rna):
+        gate = torch.sigmoid(self.gate(torch.cat([wsi, rna], dim=-1)))
+        return (gate * torch.tanh(self.wsi_transform(wsi))
+                + (1.0 - gate) * torch.tanh(self.rna_transform(rna)))
+
+
 class RNACrossAttentionClassifier(nn.Module):
     """Use one RNA query to pool WSI patches through cross-attention.
 
     Reuses the baseline RNA MLP and patch projection. Cross-attention replaces
     gated ABMIL pooling: RNA supplies Q, and projected WSI patches supply K/V.
-    The attended WSI vector is concatenated with the RNA embedding before the
-    linear classifier. Inputs follow the trainer's [RNA, WSI] convention.
+    The attended WSI vector and RNA embedding are fused by concatenation or
+    GMU before the linear classifier and optional contrastive projector.
+    Inputs follow the trainer's [RNA, WSI] convention.
 
     num_heads defaults to one; embed_dim must be divisible by num_heads.
     No positional encoding is used, so patch order does not affect evaluation.
@@ -118,8 +139,8 @@ class RNACrossAttentionClassifier(nn.Module):
                  num_classes=2, fusion="concat", num_heads=1,
                  attention_dropout=0.0, contrastive_dim=0):
         super().__init__()
-        if fusion != "concat":
-            raise ValueError("RNA cross-attention uses concatenation fusion")
+        if fusion not in ("concat", "gmu"):
+            raise ValueError("RNA cross-attention fusion must be 'concat' or 'gmu'")
         if num_heads < 1 or embed_dim % num_heads != 0:
             raise ValueError("num_heads must be positive and divide embed_dim")
         self.num_classes = num_classes
@@ -129,13 +150,15 @@ class RNACrossAttentionClassifier(nn.Module):
         self.cross_attention = nn.MultiheadAttention(
             embed_dim, num_heads, dropout=attention_dropout, batch_first=True,
         )
-        self.head = nn.Linear(2 * embed_dim, num_classes)
+        self.gmu = GatedMultimodalUnit(embed_dim) if fusion == "gmu" else None
+        fused_dim = embed_dim if self.gmu is not None else 2 * embed_dim
+        self.head = nn.Linear(fused_dim, num_classes)
 
         if not isinstance(contrastive_dim, int) or contrastive_dim < 0:
             raise ValueError("contrastive_dim must be a non-negative integer")
         self.contrastive_projector = (
             nn.Sequential(
-                nn.Linear(2 * embed_dim, embed_dim), nn.ReLU(),
+                nn.Linear(fused_dim, embed_dim), nn.ReLU(),
                 nn.Linear(embed_dim, contrastive_dim),
             ) if contrastive_dim else None
         )
@@ -158,7 +181,9 @@ class RNACrossAttentionClassifier(nn.Module):
             value=patches,
             need_weights=False,
         )
-        embedding = torch.cat([attended_wsi.squeeze(1), rna_embedding], dim=-1)
+        wsi_embedding = attended_wsi.squeeze(1)
+        embedding = (self.gmu(wsi_embedding, rna_embedding) if self.gmu is not None
+                     else torch.cat([wsi_embedding, rna_embedding], dim=-1))
         logits = self.head(embedding)
         if return_contrastive:
             if self.contrastive_projector is None:

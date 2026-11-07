@@ -155,6 +155,23 @@ behavior. For CE alone, use `rna_cross_attention.yaml`; when disabling SupCon
 in a custom config, set both `contrastive_weight` and
 `model_kwargs.contrastive_dim` to zero.
 
+### GMU fusion after cross-attention
+
+```bash
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 \
+  train_subtyping.py --config configs/rna_cross_attention_supcon_gmu.yaml
+```
+
+This config retains the SupCon experiment settings and switches `fusion` to
+`gmu`. The gate uses the attended WSI and RNA embeddings together to learn a
+weight per patient and feature dimension. Separate tanh projections are mixed
+as `g * wsi + (1 - g) * rna`; larger gate values favour the WSI branch.
+The fused vector is 768-dimensional, so the classifier is 768 -> 2 and the
+contrastive projector is 768 -> 768 -> 128. The WSI branch itself is already
+RNA-conditioned through cross-attention; gate values are not pure modality
+importance scores. Concatenation remains the default for existing configs.
+GMU requires a new training run because its fusion and head shapes differ.
+
 ### Evaluation
 
 #### Generate final test predictions
