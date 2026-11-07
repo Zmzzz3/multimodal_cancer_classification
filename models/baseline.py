@@ -5,6 +5,17 @@ from torch import nn
 from timm.models import register_model
 
 
+def _wsi_projection(input_dim, width):
+    """Project each patch independently, preserving the patch dimension."""
+    layers = []
+    for in_features in (input_dim, width):
+        layers.extend([
+            nn.Linear(in_features, width), nn.LayerNorm(width),
+            nn.GELU(), nn.Dropout(0.1),
+        ])
+    return nn.Sequential(*layers)
+
+
 class AttentionPool(nn.Module):
     """Project patch features and pool each bag with gated attention.
 
@@ -15,13 +26,7 @@ class AttentionPool(nn.Module):
 
     def __init__(self, input_dim, width):
         super().__init__()
-        layers = []
-        for in_features in (input_dim, width):
-            layers.extend([
-                nn.Linear(in_features, width), nn.LayerNorm(width),
-                nn.GELU(), nn.Dropout(0.1),
-            ])
-        self.project = nn.Sequential(*layers)
+        self.project = _wsi_projection(input_dim, width)
         self.tanh_gate = nn.Sequential(nn.Linear(width, width), nn.Tanh(), nn.Dropout(0.25))
         self.sigmoid_gate = nn.Sequential(nn.Linear(width, width), nn.Sigmoid(), nn.Dropout(0.25))
         self.score = nn.Linear(width, 1)
@@ -93,6 +98,54 @@ class BaselineClassifier(nn.Module):
         """
         rna, wsi = x
         embedding = torch.cat([self.wsi_encoder(wsi), self.rna_encoder(rna)], dim=-1)
+        return self.head(embedding)
+
+
+class RNACrossAttentionClassifier(nn.Module):
+    """Use one RNA query to pool WSI patches through cross-attention.
+
+    Reuses the baseline RNA MLP and patch projection. Cross-attention replaces
+    gated ABMIL pooling: RNA supplies Q, and projected WSI patches supply K/V.
+    The attended WSI vector is concatenated with the RNA embedding before the
+    linear classifier. Inputs follow the trainer's [RNA, WSI] convention.
+
+    num_heads defaults to one; embed_dim must be divisible by num_heads.
+    No positional encoding is used, so patch order does not affect evaluation.
+    Bags contain real or resampled patches, not zero-padding (as in the loader).
+    """
+
+    def __init__(self, rna_embed_dim, wsi_embed_dim=768, embed_dim=768,
+                 num_classes=2, fusion="concat", num_heads=1,
+                 attention_dropout=0.0):
+        super().__init__()
+        if fusion != "concat":
+            raise ValueError("RNA cross-attention uses concatenation fusion")
+        if num_heads < 1 or embed_dim % num_heads != 0:
+            raise ValueError("num_heads must be positive and divide embed_dim")
+        self.num_classes = num_classes
+        self.wsi_project = _wsi_projection(wsi_embed_dim, embed_dim)
+        self.rna_encoder = _rna_encoder(rna_embed_dim, embed_dim)
+        # Includes learned Q, K, V projections and an output projection.
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=attention_dropout, batch_first=True,
+        )
+        self.head = nn.Linear(2 * embed_dim, num_classes)
+
+    def get_classifier(self):
+        return self.head
+
+    def forward(self, x):
+        """Map RNA [B, G] and WSI [B, N, D] to logits [B, num_classes]."""
+        rna, wsi = x
+        rna_embedding = self.rna_encoder(rna)
+        patches = self.wsi_project(wsi)
+        attended_wsi, _ = self.cross_attention(
+            query=rna_embedding.unsqueeze(1),
+            key=patches,
+            value=patches,
+            need_weights=False,
+        )
+        embedding = torch.cat([attended_wsi.squeeze(1), rna_embedding], dim=-1)
         return self.head(embedding)
 
 
@@ -178,3 +231,9 @@ def wsi_only_classifier(pretrained=False, **kwargs):
 def rna_only_classifier(pretrained=False, **kwargs):
     """Create the RNA-only baseline through timm (no pretrained weights)."""
     return _create_baseline(RNAOnlyClassifier, pretrained, kwargs)
+
+
+@register_model
+def rna_cross_attention_classifier(pretrained=False, **kwargs):
+    """Create the RNA-query cross-attention classifier through timm."""
+    return _create_baseline(RNACrossAttentionClassifier, pretrained, kwargs)
