@@ -131,6 +131,30 @@ For a CPU execution check, call the training script directly:
 uv run --locked python train_subtyping.py --config configs/baseline.yaml --device cpu --epochs 1 --experiment cpu-check
 ```
 
+### Cross-attention with supervised contrastive regularisation
+
+```bash
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 \
+  train_subtyping.py --config configs/rna_cross_attention_supcon.yaml
+```
+
+This separate experiment trains with cross-entropy plus class-based SupCon,
+using `contrastive_weight: 0.1`, `contrastive_temperature: 0.1`, and a projection
+MLP (1536 -> 768 -> 128) on the fused embedding. The contrastive loss normalises
+the projections and computes similarities in float32. Positives are other
+same-class patients; self-pairs are excluded. Anchors without positives are
+skipped, and batches with no positives contribute zero contrastive loss.
+Pairs are local to each GPU's minibatch, with no cross-step accumulation.
+The existing sampler is unchanged and does not guarantee balanced batches.
+
+Training loss is the combined objective. Validation loss remains unsmoothed
+cross-entropy, and checkpoint selection still uses validation AUROC. The
+projection head is saved in the checkpoint but skipped during inference.
+Existing configs default to zero contrastive weight and retain their original
+behavior. For CE alone, use `rna_cross_attention.yaml`; when disabling SupCon
+in a custom config, set both `contrastive_weight` and
+`model_kwargs.contrastive_dim` to zero.
+
 ### Evaluation
 
 #### Generate final test predictions

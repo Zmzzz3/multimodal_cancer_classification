@@ -42,6 +42,7 @@ import models  # noqa: F401
 from datasets import SlideOmicsShardedSubtypingDataset
 from utils import PrefetchLoader, fast_collate
 from evaluation import compute_metrics
+from utils.contrastive import supervised_contrastive_loss
 
 try:
     from apex import amp
@@ -236,6 +237,10 @@ group.add_argument('--loss', type=str, choices=['ce_loss'], default='ce_loss',
                    help='Loss function (default: ce_loss)')
 group.add_argument('--smoothing', type=float, default=0.1,
                    help='Label smoothing (default: 0.1)')
+group.add_argument('--contrastive-weight', type=float, default=0.0,
+                   help='Weight of class-based SupCon regularisation (0 disables it)')
+group.add_argument('--contrastive-temperature', type=float, default=0.1,
+                   help='Positive temperature for the SupCon loss')
 
 # Batch norm parameters (only works with gen_efficientnet based models currently)
 group = parser.add_argument_group('Batch norm parameters', 'Only works with gen_efficientnet based models currently.')
@@ -313,6 +318,18 @@ def main():
     """Run training and save checkpoints with their validation predictions."""
     utils.setup_default_logging()
     args, args_text = _parse_args()
+
+    if not math.isfinite(args.contrastive_weight) or args.contrastive_weight < 0:
+        raise ValueError('contrastive_weight must be finite and non-negative')
+    if not math.isfinite(args.contrastive_temperature) or args.contrastive_temperature <= 0:
+        raise ValueError('contrastive_temperature must be finite and positive')
+    if args.contrastive_weight > 0:
+        if args.model != 'rna_cross_attention_classifier' or args.wsi_feature_only:
+            raise ValueError('SupCon requires rna_cross_attention_classifier with paired inputs')
+        if args.model_kwargs.get('contrastive_dim', 0) <= 0:
+            raise ValueError('SupCon requires model_kwargs.contrastive_dim > 0')
+    elif args.model_kwargs.get('contrastive_dim', 0) > 0:
+        raise ValueError('Set contrastive_dim to 0 when contrastive_weight is 0')
 
     if args.device_modules:
         for module in args.device_modules:
@@ -839,11 +856,19 @@ def train_one_epoch(
         # These closures run within the current iteration before its values change.
         def _forward():
             with amp_autocast():
-                if rna_features is None:  # noqa: B023
+                if args.contrastive_weight > 0:
+                    output, contrastive_features = model(
+                        [rna_features, wsi_features], return_contrastive=True,
+                    )
+                elif rna_features is None:  # noqa: B023
                     output = model(wsi_features)  # noqa: B023
                 else:
                     output = model([rna_features, wsi_features])  # noqa: B023
                 loss = loss_fn(output, labels)  # noqa: B023
+            if args.contrastive_weight > 0:
+                loss = loss + args.contrastive_weight * supervised_contrastive_loss(
+                    contrastive_features, labels, args.contrastive_temperature,
+                )
             if accum_steps > 1:  # noqa: B023
                 loss /= accum_steps  # noqa: B023
             return loss

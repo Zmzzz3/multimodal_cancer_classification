@@ -116,7 +116,7 @@ class RNACrossAttentionClassifier(nn.Module):
 
     def __init__(self, rna_embed_dim, wsi_embed_dim=768, embed_dim=768,
                  num_classes=2, fusion="concat", num_heads=1,
-                 attention_dropout=0.0):
+                 attention_dropout=0.0, contrastive_dim=0):
         super().__init__()
         if fusion != "concat":
             raise ValueError("RNA cross-attention uses concatenation fusion")
@@ -131,11 +131,24 @@ class RNACrossAttentionClassifier(nn.Module):
         )
         self.head = nn.Linear(2 * embed_dim, num_classes)
 
+        if not isinstance(contrastive_dim, int) or contrastive_dim < 0:
+            raise ValueError("contrastive_dim must be a non-negative integer")
+        self.contrastive_projector = (
+            nn.Sequential(
+                nn.Linear(2 * embed_dim, embed_dim), nn.ReLU(),
+                nn.Linear(embed_dim, contrastive_dim),
+            ) if contrastive_dim else None
+        )
+
     def get_classifier(self):
         return self.head
 
-    def forward(self, x):
-        """Map RNA [B, G] and WSI [B, N, D] to logits [B, num_classes]."""
+    def forward(self, x, return_contrastive=False):
+        """Return logits, optionally paired with training projection features.
+
+        Default inference skips the projection head. L2 normalisation is done
+        in float32 by the contrastive loss for mixed-precision stability.
+        """
         rna, wsi = x
         rna_embedding = self.rna_encoder(rna)
         patches = self.wsi_project(wsi)
@@ -146,7 +159,12 @@ class RNACrossAttentionClassifier(nn.Module):
             need_weights=False,
         )
         embedding = torch.cat([attended_wsi.squeeze(1), rna_embedding], dim=-1)
-        return self.head(embedding)
+        logits = self.head(embedding)
+        if return_contrastive:
+            if self.contrastive_projector is None:
+                raise ValueError("Set contrastive_dim > 0 to request contrastive features")
+            return logits, self.contrastive_projector(embedding)
+        return logits
 
 
 class WSIOnlyClassifier(nn.Module):
