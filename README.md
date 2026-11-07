@@ -172,6 +172,22 @@ RNA-conditioned through cross-attention; gate values are not pure modality
 importance scores. Concatenation remains the default for existing configs.
 GMU requires a new training run because its fusion and head shapes differ.
 
+### Adaptive gated concatenation
+
+```bash
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 \
+  train_subtyping.py --config configs/rna_cross_attention_supcon_gated_concat.yaml
+```
+
+This experiment keeps the SupCon settings and uses `fusion: gated_concat`.
+A patient- and feature-specific gate computes
+`g = sigmoid(W [wsi; rna] + b)`, then outputs `[g * wsi; (1-g) * rna]`.
+The gate weights and bias start at zero (equal weighting). The initial fused
+embedding is half the plain concatenation, not an identical-logit warm start.
+Both branches remain separate, preserving the 1536-dimensional classifier and
+projection inputs without GMU's tanh transforms or summed bottleneck.
+Start a fresh run in the configuration's separate experiment directory.
+
 ### Evaluation
 
 #### Generate final test predictions
