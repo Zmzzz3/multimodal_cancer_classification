@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS] <train_script> --config <config_file> [train_args...]
+   or: $(basename "$0") [OPTIONS] -m <baseline|wsi|rna> [-- train_args...]
 
 Launcher options (handled by this script):
   -e  Rendezvous endpoint, e.g. master:29500
@@ -14,6 +15,7 @@ Launcher options (handled by this script):
   -P  Processes per node (GPUs/node)               [default: 1 or \$NPROC_PER_NODE]
   -t  OMP_NUM_THREADS                              [default: auto from cores/GPUs, or \$OMP_NUM_THREADS]
   -d  Dry run (print command and exit)
+  -m  Model preset: baseline, wsi, or rna (uses configs/<preset>.yaml)
   -h  Show this help message
 
 Set a shared, unique RDZV_ID for c10d multi-node launches.
@@ -27,6 +29,14 @@ Example (single node, default rendezvous = localhost:0):
 
   $(basename "$0") -N 1 -P 1 -t 4 \\
       train_subtyping.py --config configs/baseline.yaml --experiment baseline
+
+Model presets (run from the package directory):
+  $(basename "$0") -N 1 -P 1 -t 4 -m wsi
+  $(basename "$0") -N 1 -P 1 -t 4 -m rna
+  $(basename "$0") -d -m wsi -- --epochs 1 --experiment wsi_check
+
+Presets select train_subtyping.py and the matching config, including its
+experiment directory. Put training overrides after -- in preset mode.
 EOF
 }
 
@@ -49,18 +59,20 @@ node_rank="${NODE_RANK:-}"
 # If user set OMP_NUM_THREADS in env, respect it; else we'll auto-compute later
 OMP_NUM_THREADS_VAL="${OMP_NUM_THREADS:-}"
 dry_run=0
+model_preset=""
 
 # --------------------------------------------------------------------------- #
 # Parse launcher options (built-in getopts)
 # --------------------------------------------------------------------------- #
 
-while getopts ":N:P:R:e:t:dh" opt; do
+while getopts ":N:P:R:e:t:m:dh" opt; do
     case "$opt" in
         N) nnodes="$OPTARG" ;;
         P) nproc_per_node="$OPTARG" ;;
         R) node_rank="$OPTARG" ;;
         e) rdzv_endpoint="$OPTARG" ;;
         t) OMP_NUM_THREADS_VAL="$OPTARG" ;;
+        m) model_preset="$OPTARG" ;;
         d) dry_run=1 ;;
         h) usage; exit 0 ;;
         :)
@@ -82,23 +94,31 @@ shift $((OPTIND - 1))
 # Positional: <train_script> --config <cfg> [train_args...]
 # --------------------------------------------------------------------------- #
 
-# Need at least: train_script, --config, config_file
-if [ "$#" -lt 3 ]; then
-    echo "Error: expected <train_script> --config <config_file> [train_args...]." >&2
-    echo
-    usage
-    exit 1
+if [ -n "$model_preset" ]; then
+    case "$model_preset" in
+        baseline|wsi|rna) ;;
+        *) die "-m must be baseline, wsi, or rna (got '$model_preset')." ;;
+    esac
+    train_script="train_subtyping.py"
+    config_file="configs/${model_preset}.yaml"
+    if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then
+        die "preset mode takes training options after --, not a training script."
+    fi
+else
+    # Explicit mode: train_script, --config, config_file.
+    if [ "$#" -lt 3 ]; then
+        echo "Error: specify -m <baseline|wsi|rna> or <train_script> --config <config_file>." >&2
+        usage
+        exit 1
+    fi
+    train_script="$1"
+    shift
+    if [ "$1" != "--config" ]; then
+        die "first argument after <train_script> must be '--config'. Got '$1'."
+    fi
+    config_file="$2"
+    shift 2
 fi
-
-train_script="$1"
-shift
-
-if [ "$1" != "--config" ]; then
-    die "first argument after <train_script> must be '--config'. Got '$1'."
-fi
-
-config_file="$2"
-shift 2
 
 train_args=(--config "$config_file" "$@")
 

@@ -104,6 +104,18 @@ checkpoint and the existing `evaluation.py` command with that checkpoint path.
 
 #### Using the launcher
 
+Use `-m baseline`, `-m wsi`, or `-m rna` to select the corresponding config
+and experiment directory without specifying the training script:
+
+```bash
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 -m wsi
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 -m rna
+```
+
+Add `-d` to preview a launch. In preset mode, place training overrides after
+`--`, for example `-m wsi -- --epochs 1 --experiment wsi_check`.
+The explicit script/config form below is also supported.
+
 On Linux or Colab, you can also use the Bash launcher to start training through `torchrun`. Run it from `COMP3419-A2-Opt8-Code/`. On Windows, use the direct Python command above.
 
 | Launcher option | Meaning in the example |
