@@ -83,25 +83,6 @@ After each epoch, the trainer predicts the validation patients to calculate metr
 uv run --locked python train_subtyping.py --config configs/baseline.yaml --experiment baseline
 ```
 
-### Unimodal baselines
-
-Two additional timm models reuse the corresponding baseline encoder and a
-`768 -> 2` linear head: `wsi_only_classifier` (gated ABMIL) and
-`rna_only_classifier` (RNA MLP). Each instantiates only its own modality encoder.
-Train them with the same configuration and separate experiment directories:
-
-```bash
-uv run --locked python train_subtyping.py --config configs/baseline.yaml --model wsi_only_classifier --experiment wsi_only
-uv run --locked python train_subtyping.py --config configs/baseline.yaml --model rna_only_classifier --experiment rna_only
-```
-
-Keep `wsi_feature_only: false` for these commands. Both models accept the
-loader's `[rna, wsi]` inputs and ignore the unused modality; the loader still
-reads both modalities. The WSI-only model also supports the trainer's
-`wsi_feature_only` mode. For direct model calls, either model additionally
-accepts its own modality tensor. Evaluation uses the model name saved in each
-checkpoint and the existing `evaluation.py` command with that checkpoint path.
-
 #### Using the launcher
 
 Use `-m baseline`, `-m wsi`, or `-m rna` to select the corresponding config
