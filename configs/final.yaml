@@ -20,13 +20,15 @@ grad_accum_steps: 1
 grad_checkpointing: false
 fast_norm: false
 model_kwargs:
-wsi_embed_dim: 768
-# The supplied index determines the actual RNA width saved in the checkpoint.
-rna_embed_dim: 4538
-embed_dim: 768
-fusion: gated_concat
-num_heads: 1
-contrastive_dim: 128
+  wsi_embed_dim: 768
+  # The supplied index determines the actual RNA width saved in the checkpoint.
+  rna_embed_dim: 4538
+  embed_dim: 768
+  fusion: gated_concat
+  num_heads: 1
+  contrastive_dim: 128
+  # Training-only regularisation of cross-attention weights.
+  attention_dropout: 0.1
 init_head: false
 head_init_scale: null
 head_init_bias: null
@@ -88,7 +90,6 @@ loss: ce_loss
 smoothing: 0.1
 contrastive_weight: 0.1
 contrastive_temperature: 0.1
-attention_dropout: 0.1
 
 # Batch norm parameters (inactive for this LayerNorm-based baseline)
 sync_bn: false
