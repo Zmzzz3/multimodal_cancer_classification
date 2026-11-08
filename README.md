@@ -188,6 +188,20 @@ Both branches remain separate, preserving the 1536-dimensional classifier and
 projection inputs without GMU's tanh transforms or summed bottleneck.
 Start a fresh run in the configuration's separate experiment directory.
 
+### Original baseline with GMU fusion
+
+```bash
+uv run --locked ./scripts/train_launcher.sh -N 1 -P 1 -t 4 \
+  train_subtyping.py --config configs/baseline_gmu.yaml
+```
+
+This uses `baseline_classifier` with `fusion: gmu`: the original gated ABMIL
+WSI encoder and RNA MLP feed the existing tanh-based GMU, then a 768 -> 2
+classifier. Training settings match `baseline.yaml`; cross-attention and
+contrastive regularisation are not used. Results go to `output/baseline_gmu/`.
+The original concatenation baseline remains the default. Train from scratch;
+the fusion parameters and classifier shape differ from a concatenation checkpoint.
+
 ### Evaluation
 
 #### Generate final test predictions

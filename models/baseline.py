@@ -60,27 +60,28 @@ def _rna_encoder(input_dim, width):
 
 
 class BaselineClassifier(nn.Module):
-    """Fuse WSI attention pooling and an RNA MLP by concatenation.
+    """Fuse WSI attention pooling and an RNA MLP by concatenation or GMU.
 
     Args:
         rna_embed_dim: Number of supplied RNA features per patient.
         wsi_embed_dim: Number of features per WSI patch.
         embed_dim: Output width of each modality encoder.
         num_classes: Number of output class scores.
-        fusion: Fusion rule; only "concat" is supported.
+        fusion: Fusion rule: "concat" (default) or "gmu".
 
     Raises:
-        ValueError: If fusion is not "concat".
+        ValueError: If fusion is neither "concat" nor "gmu".
     """
 
     def __init__(self, rna_embed_dim, wsi_embed_dim=768, embed_dim=768, num_classes=2, fusion="concat"):
         super().__init__()
-        if fusion != "concat":
-            raise ValueError("This baseline uses concatenation fusion")
+        if fusion not in ("concat", "gmu"):
+            raise ValueError("Baseline fusion must be 'concat' or 'gmu'")
         self.num_classes = num_classes
         self.wsi_encoder = AttentionPool(wsi_embed_dim, embed_dim)
         self.rna_encoder = _rna_encoder(rna_embed_dim, embed_dim)
-        self.head = nn.Linear(2 * embed_dim, num_classes)
+        self.gmu = GatedMultimodalUnit(embed_dim) if fusion == "gmu" else None
+        self.head = nn.Linear(embed_dim if self.gmu is not None else 2 * embed_dim, num_classes)
 
     def get_classifier(self):
         return self.head
@@ -97,7 +98,10 @@ class BaselineClassifier(nn.Module):
             configuration orders the two classes as LUAD, LUSC.
         """
         rna, wsi = x
-        embedding = torch.cat([self.wsi_encoder(wsi), self.rna_encoder(rna)], dim=-1)
+        wsi_embedding = self.wsi_encoder(wsi)
+        rna_embedding = self.rna_encoder(rna)
+        embedding = (self.gmu(wsi_embedding, rna_embedding) if self.gmu is not None
+                     else torch.cat([wsi_embedding, rna_embedding], dim=-1))
         return self.head(embedding)
 
 
